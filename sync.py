@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Data sync script: rsyncs experiment folders (YYYY-mm_ExperimenterName) from source to destination."""
 
+import glob
 import logging
 import os
 import re
@@ -46,16 +47,46 @@ def setup_logging(log_file):
 
 
 def find_experiment_folders(source_dir):
-    """Return list of folder names in source_dir matching YYYY-mm_<Name> pattern."""
-    if not os.path.isdir(source_dir):
-        raise FileNotFoundError(f"Source directory does not exist: {source_dir}")
+    """Return (base_dir, folder_names) for experiment dirs matching YYYY-mm_<Name> pattern.
 
-    folders = []
-    for entry in sorted(os.listdir(source_dir)):
-        full_path = os.path.join(source_dir, entry)
-        if os.path.isdir(full_path) and EXPERIMENT_PATTERN.match(entry):
-            folders.append(entry)
-    return folders
+    source_dir can contain glob wildcards (e.g. /data/2026*). When a glob is
+    present, matched directories are filtered by the experiment pattern and the
+    base directory is derived from the non-glob prefix of the path.
+    """
+    has_glob = any(c in source_dir for c in ("*", "?", "["))
+
+    if has_glob:
+        # Derive the base directory from the non-glob prefix
+        # e.g. "/data/experiments/2026*" → base="/data/experiments"
+        parts = source_dir.split(os.sep)
+        base_parts = []
+        for part in parts:
+            if any(c in part for c in ("*", "?", "[")):
+                break
+            base_parts.append(part)
+        base_dir = os.sep.join(base_parts) or os.sep
+
+        if not os.path.isdir(base_dir):
+            raise FileNotFoundError(f"Base source directory does not exist: {base_dir}")
+
+        matches = sorted(glob.glob(source_dir))
+        folders = []
+        for path in matches:
+            if os.path.isdir(path):
+                name = os.path.basename(path)
+                if EXPERIMENT_PATTERN.match(name):
+                    folders.append(name)
+        return base_dir, folders
+    else:
+        if not os.path.isdir(source_dir):
+            raise FileNotFoundError(f"Source directory does not exist: {source_dir}")
+
+        folders = []
+        for entry in sorted(os.listdir(source_dir)):
+            full_path = os.path.join(source_dir, entry)
+            if os.path.isdir(full_path) and EXPERIMENT_PATTERN.match(entry):
+                folders.append(entry)
+        return source_dir, folders
 
 
 def build_rsync_excludes(exclusions):
@@ -101,8 +132,8 @@ def main():
     dest_dir = config["dest_dir"]
     exclusions = config["exclusions"]
 
-    # Filter out any experiment folders that are fully excluded
-    all_folders = find_experiment_folders(source_dir)
+    # find_experiment_folders returns the resolved base dir (handles globs)
+    source_dir, all_folders = find_experiment_folders(source_dir)
     folders = [f for f in all_folders if f not in exclusions]
     skipped = [f for f in all_folders if f in exclusions]
 
