@@ -19,6 +19,15 @@ LOCK_PATH = os.path.join(SCRIPT_DIR, ".sync.lock")
 EXPERIMENT_PATTERN = re.compile(r"^\d{4}-\d{2}_.+$")
 
 
+def _is_pid_alive(pid):
+    """Check if a process with the given PID is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def acquire_lock():
     """Create a lock file to prevent overlapping runs. Returns True if acquired."""
     try:
@@ -28,6 +37,17 @@ def acquire_lock():
         atexit.register(release_lock)
         return True
     except FileExistsError:
+        # Check if the existing lock is stale (owner process no longer running)
+        try:
+            with open(LOCK_PATH) as f:
+                old_pid = int(f.read().strip())
+            if not _is_pid_alive(old_pid):
+                os.remove(LOCK_PATH)
+                return acquire_lock()
+        except (ValueError, OSError):
+            # Corrupt lock file — remove and retry
+            os.remove(LOCK_PATH)
+            return acquire_lock()
         return False
 
 
@@ -133,7 +153,11 @@ def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run
         cmd.append("--dry-run")
     cmd += exclude_args + [src, dst]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    except subprocess.TimeoutExpired:
+        logger.error("rsync timed out for %s after 5 minutes", folder_name)
+        return False
 
     if result.returncode != 0:
         logger.error("rsync failed for %s (exit %d): %s", folder_name, result.returncode, result.stderr.strip())
@@ -157,7 +181,7 @@ def main():
 
     if not acquire_lock():
         logger.warning("Another sync is already running (lock file exists: %s). Exiting.", LOCK_PATH)
-        sys.exit(0)
+        sys.exit(2)
 
     source_dir = config["source_dir"]
     dest_dir = config["dest_dir"]
