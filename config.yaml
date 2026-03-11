@@ -1,0 +1,15 @@
+# Data Sync Configuration
+source_dir: "/path/to/source"
+dest_dir: "/path/to/destination"
+
+# Log file path (relative to this config or absolute)
+log_file: "sync.log"
+
+# Exclusion list (comma-separated)
+# Can be:
+#   - Full experiment folder names (e.g. 2025-03_Smith)
+#   - Subfolder names within experiments (e.g. raw_data/temp)
+#   - Specific filenames (e.g. notes.txt)
+#   - File patterns with wildcard (e.g. *.tmp)
+exclusions: ""
+# Example: exclusions: "2024-01_TestUser, scratch/, *.tmp, debug.log"
