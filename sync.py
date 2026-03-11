@@ -100,7 +100,7 @@ def build_rsync_excludes(exclusions):
 def sync_folder(source_dir, dest_dir, folder_name, exclude_args, logger):
     """Rsync a single experiment folder. Returns True on success."""
     src = os.path.join(source_dir, folder_name) + "/"
-    dst = dest_dir.rstrip("/") + "/" + folder_name + "/"
+    dst = os.path.join(dest_dir, folder_name) + "/"
 
     cmd = ["rsync", "-av", "--delete"] + exclude_args + [src, dst]
 
