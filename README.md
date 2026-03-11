@@ -30,7 +30,7 @@ Automated data sync tool that rsyncs experiment folders from a source directory 
 Edit `config.yaml`:
 
 - **source_dir** — Directory containing experiment folders
-- **dest_dir** — Destination to sync to
+- **dest_dir** — Remote rsync destination (e.g. `user@host:/path/to/destination`)
 - **log_file** — Path for log output (default: `sync.log`)
 - **exclusions** — Comma-separated list of items to exclude from sync:
   - Full experiment folder names (e.g. `2025-03_Smith`)
