@@ -1,0 +1,32 @@
+# Data Sync Configuration
+# Supports glob wildcards, e.g. "/path/to/source/2026*" to only sync 2026 dirs
+source_dir: "/path/to/source"
+dest_dir: "user@host:/path/to/destination"
+
+# Log file path (relative to script directory or absolute)
+log_file: "sync.log"
+
+# Delete mode: when true, rsync --delete removes destination files not present
+# in source. Set to false for safer append-only syncs.
+delete: false
+
+# Dry run: when true, rsync performs a trial run with no changes made.
+dry_run: false
+
+# Experiment folders to skip entirely (list)
+# These folders will not be synced at all.
+exclude_folders: []
+# Example:
+# exclude_folders:
+#   - 2024-01_TestUser
+#   - 2025-06_DebugRun
+
+# Rsync exclude patterns applied within each synced folder (list)
+# These patterns are passed to rsync --exclude.
+exclude_patterns: []
+# Example:
+# exclude_patterns:
+#   - "*.tmp"
+#   - scratch/
+#   - debug.log
+#   - raw_data/temp

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Data sync script: rsyncs experiment folders (YYYY-mm_ExperimenterName) from source to destination."""
 
+import atexit
 import glob
 import logging
 import os
@@ -12,9 +13,30 @@ import yaml
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.yaml")
+LOCK_PATH = os.path.join(SCRIPT_DIR, ".sync.lock")
 
 # Matches folders like 2025-03_Smith or 2024-11_Jane_Doe
 EXPERIMENT_PATTERN = re.compile(r"^\d{4}-\d{2}_.+$")
+
+
+def acquire_lock():
+    """Create a lock file to prevent overlapping runs. Returns True if acquired."""
+    try:
+        fd = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        atexit.register(release_lock)
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_lock():
+    """Remove the lock file."""
+    try:
+        os.remove(LOCK_PATH)
+    except FileNotFoundError:
+        pass
 
 
 def load_config():
@@ -26,9 +48,11 @@ def load_config():
         if not config.get(key):
             raise ValueError(f"Missing required config key: {key}")
 
-    # Parse exclusions from comma-separated string to list
-    raw_exclusions = config.get("exclusions", "") or ""
-    config["exclusions"] = [e.strip() for e in raw_exclusions.split(",") if e.strip()]
+    # Normalize list fields
+    config["exclude_folders"] = config.get("exclude_folders") or []
+    config["exclude_patterns"] = config.get("exclude_patterns") or []
+    config.setdefault("delete", False)
+    config.setdefault("dry_run", False)
 
     return config
 
@@ -89,20 +113,25 @@ def find_experiment_folders(source_dir):
         return source_dir, folders
 
 
-def build_rsync_excludes(exclusions):
-    """Convert exclusion list to rsync --exclude arguments."""
+def build_rsync_excludes(exclude_patterns):
+    """Convert exclude_patterns list to rsync --exclude arguments."""
     args = []
-    for item in exclusions:
+    for item in exclude_patterns:
         args.extend(["--exclude", item])
     return args
 
 
-def sync_folder(source_dir, dest_dir, folder_name, exclude_args, logger):
+def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger):
     """Rsync a single experiment folder. Returns True on success."""
     src = os.path.join(source_dir, folder_name) + "/"
     dst = os.path.join(dest_dir, folder_name) + "/"
 
-    cmd = ["rsync", "-av", "--delete"] + exclude_args + [src, dst]
+    cmd = ["rsync", "-av"]
+    if delete:
+        cmd.append("--delete")
+    if dry_run:
+        cmd.append("--dry-run")
+    cmd += exclude_args + [src, dst]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -117,7 +146,8 @@ def sync_folder(source_dir, dest_dir, folder_name, exclude_args, logger):
         and not line.startswith("total size") and line != "./"
     ]
     if transferred:
-        logger.info("Synced %s (%d item(s) transferred)", folder_name, len(transferred))
+        prefix = "[DRY RUN] " if dry_run else ""
+        logger.info("%sSynced %s (%d item(s) transferred)", prefix, folder_name, len(transferred))
     return True
 
 
@@ -125,14 +155,24 @@ def main():
     config = load_config()
     logger = setup_logging(config.get("log_file", "sync.log"))
 
+    if not acquire_lock():
+        logger.warning("Another sync is already running (lock file exists: %s). Exiting.", LOCK_PATH)
+        sys.exit(0)
+
     source_dir = config["source_dir"]
     dest_dir = config["dest_dir"]
-    exclusions = config["exclusions"]
+    exclude_folders = config["exclude_folders"]
+    exclude_patterns = config["exclude_patterns"]
+    delete = config["delete"]
+    dry_run = config["dry_run"]
+
+    if dry_run:
+        logger.info("Running in dry-run mode — no changes will be made")
 
     # find_experiment_folders returns the resolved base dir (handles globs)
     source_dir, all_folders = find_experiment_folders(source_dir)
-    folders = [f for f in all_folders if f not in exclusions]
-    skipped = [f for f in all_folders if f in exclusions]
+    folders = [f for f in all_folders if f not in exclude_folders]
+    skipped = [f for f in all_folders if f in exclude_folders]
 
     if skipped:
         logger.info("Skipping excluded experiment folders: %s", ", ".join(skipped))
@@ -141,11 +181,11 @@ def main():
         logger.info("No experiment folders to sync in %s", source_dir)
         return
 
-    exclude_args = build_rsync_excludes(exclusions)
+    exclude_args = build_rsync_excludes(exclude_patterns)
 
     errors = 0
     for folder in folders:
-        if not sync_folder(source_dir, dest_dir, folder, exclude_args, logger):
+        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger):
             errors += 1
 
     if errors:

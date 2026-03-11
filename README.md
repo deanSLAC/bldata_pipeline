@@ -8,10 +8,13 @@ Automated data sync tool that rsyncs experiment folders from a source directory 
    ```bash
    python3 -m venv venv
    source venv/bin/activate
-   pip install pyyaml
+   pip install -r requirements.txt
    ```
 
-2. Edit `config.yaml` with your source/destination paths and any exclusions.
+2. Copy the example config and edit with your paths:
+   ```bash
+   cp config.yaml.example config.yaml
+   ```
 
 3. Run manually:
    ```bash
@@ -24,19 +27,19 @@ Automated data sync tool that rsyncs experiment folders from a source directory 
    # Add:
    * * * * * /path/to/venv/bin/python /path/to/sync.py
    ```
+   A lock file prevents overlapping runs, so it's safe to schedule frequently.
 
 ## Configuration
 
 Edit `config.yaml`:
 
-- **source_dir** — Directory containing experiment folders
+- **source_dir** — Directory containing experiment folders (supports glob wildcards)
 - **dest_dir** — Remote rsync destination (e.g. `user@host:/path/to/destination`)
 - **log_file** — Path for log output (default: `sync.log`)
-- **exclusions** — Comma-separated list of items to exclude from sync:
-  - Full experiment folder names (e.g. `2025-03_Smith`)
-  - Subfolder paths (e.g. `raw_data/temp`)
-  - Specific filenames (e.g. `notes.txt`)
-  - Wildcard patterns (e.g. `*.tmp`)
+- **delete** — When `true`, rsync `--delete` removes destination files not in source (default: `false`)
+- **dry_run** — When `true`, rsync performs a trial run with no changes (default: `false`)
+- **exclude_folders** — List of experiment folder names to skip entirely
+- **exclude_patterns** — List of rsync exclude patterns applied within each synced folder
 
 ## Folder Detection
 
