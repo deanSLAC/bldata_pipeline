@@ -1,0 +1,21 @@
+# Log File Sync Configuration
+source_dir: "/path/to/log/source"
+dest_dir: "user@host:/path/to/log/destination"
+
+# Log file path (relative to script directory or absolute)
+log_file: "sync_logs.log"
+
+# Delete mode: when true, rsync --delete removes destination files not present
+# in source. Set to false for safer append-only syncs.
+delete: false
+
+# Dry run: when true, rsync performs a trial run with no changes made.
+dry_run: false
+
+# Rsync exclude patterns (list)
+# These patterns are passed to rsync --exclude.
+exclude_patterns: []
+# Example:
+# exclude_patterns:
+#   - "*.tmp"
+#   - "*.bak"
