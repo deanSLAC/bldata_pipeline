@@ -14,6 +14,13 @@ delete: false
 # Dry run: when true, rsync performs a trial run with no changes made.
 dry_run: false
 
+# Set destination file permissions (optional, e.g. "770", "755")
+# chmod: "770"
+
+# Set destination file ownership (optional, requires appropriate privileges)
+# Use ":group" for group-only, "user:group" for both
+# chown: ":k8sgroup"
+
 # Rsync exclude patterns (list)
 # These patterns are passed to rsync --exclude.
 exclude_patterns: []

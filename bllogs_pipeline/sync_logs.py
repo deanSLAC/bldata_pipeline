@@ -23,6 +23,8 @@ def load_config():
     config["exclude_patterns"] = config.get("exclude_patterns") or []
     config.setdefault("delete", False)
     config.setdefault("dry_run", False)
+    config.setdefault("chmod", "")
+    config.setdefault("chown", "")
 
     return config
 
@@ -64,7 +66,7 @@ def build_rsync_excludes(exclude_patterns):
     return args
 
 
-def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths=None):
+def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths=None, chmod="", chown=""):
     """Rsync log files to the destination. Returns True on success.
 
     If matched_paths is None, syncs the entire source_dir.
@@ -77,6 +79,10 @@ def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, match
         cmd.append("--delete")
     if dry_run:
         cmd.append("--dry-run")
+    if chmod:
+        cmd.append(f"--chmod={chmod}")
+    if chown:
+        cmd.append(f"--chown={chown}")
 
     if matched_paths is not None:
         cmd += exclude_args + matched_paths + [dst]
@@ -117,6 +123,8 @@ def run(logger):
     exclude_patterns = config["exclude_patterns"]
     delete = config["delete"]
     dry_run = config["dry_run"]
+    chmod = config["chmod"]
+    chown = config["chown"]
 
     if dry_run:
         logger.info("Running in dry-run mode — no changes will be made")
@@ -133,4 +141,4 @@ def run(logger):
 
     exclude_args = build_rsync_excludes(exclude_patterns)
 
-    return sync_logs(base_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths)
+    return sync_logs(base_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths, chmod, chown)

@@ -29,6 +29,8 @@ def load_config():
     config["exclude_patterns"] = config.get("exclude_patterns") or []
     config.setdefault("delete", False)
     config.setdefault("dry_run", False)
+    config.setdefault("chmod", "")
+    config.setdefault("chown", "")
 
     return config
 
@@ -84,7 +86,7 @@ def build_rsync_excludes(exclude_patterns):
     return args
 
 
-def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger):
+def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger, chmod="", chown=""):
     """Rsync a single experiment folder. Returns True on success."""
     src = os.path.join(source_dir, folder_name) + "/"
     dst = os.path.join(dest_dir, folder_name) + "/"
@@ -94,6 +96,10 @@ def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run
         cmd.append("--delete")
     if dry_run:
         cmd.append("--dry-run")
+    if chmod:
+        cmd.append(f"--chmod={chmod}")
+    if chown:
+        cmd.append(f"--chown={chown}")
     cmd += exclude_args + [src, dst]
 
     try:
@@ -128,6 +134,8 @@ def run(logger):
     exclude_patterns = config["exclude_patterns"]
     delete = config["delete"]
     dry_run = config["dry_run"]
+    chmod = config["chmod"]
+    chown = config["chown"]
 
     if dry_run:
         logger.info("Running in dry-run mode — no changes will be made")
@@ -148,7 +156,7 @@ def run(logger):
 
     errors = 0
     for folder in folders:
-        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger):
+        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger, chmod, chown):
             errors += 1
 
     if errors:
