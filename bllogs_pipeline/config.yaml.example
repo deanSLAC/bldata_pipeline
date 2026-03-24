@@ -1,4 +1,6 @@
 # Log File Sync Configuration
+# Supports glob wildcards to match specific log files within a directory,
+# e.g. "/path/to/logs/log*" or "/path/to/logs/*2026"
 source_dir: "/path/to/log/source"
 dest_dir: "user@host:/path/to/log/destination"
 
