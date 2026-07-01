@@ -13,6 +13,11 @@ delete: false
 # Dry run: when true, rsync performs a trial run with no changes made.
 dry_run: false
 
+# SSH private key for the rsync transport (optional). When set, rsync runs
+# `ssh -i <ssh_key> -o IdentitiesOnly=yes` instead of using the default key.
+# Leave empty to use ssh's default key resolution / ~/.ssh/config.
+# ssh_key: "~/.ssh/s3df-key"
+
 # Set destination file permissions (optional, e.g. "770", "755")
 # chmod: "770"
 

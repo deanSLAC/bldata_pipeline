@@ -31,6 +31,7 @@ def load_config():
     config.setdefault("dry_run", False)
     config.setdefault("chmod", "")
     config.setdefault("chown", "")
+    config.setdefault("ssh_key", "")
 
     return config
 
@@ -86,12 +87,26 @@ def build_rsync_excludes(exclude_patterns):
     return args
 
 
-def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger, chmod="", chown=""):
+def build_rsync_ssh(ssh_key):
+    """Return rsync args to use a specific SSH key, or [] for the default.
+
+    IdentitiesOnly=yes forces ssh to use only this key, avoiding
+    "Too many authentication failures" when other keys/agent identities exist.
+    """
+    if not ssh_key:
+        return []
+    key_path = os.path.expanduser(ssh_key)
+    return ["-e", f"ssh -i {key_path} -o IdentitiesOnly=yes"]
+
+
+def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger, chmod="", chown="", ssh_args=None):
     """Rsync a single experiment folder. Returns True on success."""
     src = os.path.join(source_dir, folder_name) + "/"
     dst = os.path.join(dest_dir, folder_name) + "/"
 
     cmd = ["rsync", "-av"]
+    if ssh_args:
+        cmd += ssh_args
     if delete:
         cmd.append("--delete")
     if dry_run:
@@ -136,6 +151,7 @@ def run(logger):
     dry_run = config["dry_run"]
     chmod = config["chmod"]
     chown = config["chown"]
+    ssh_args = build_rsync_ssh(config["ssh_key"])
 
     if dry_run:
         logger.info("Running in dry-run mode — no changes will be made")
@@ -156,7 +172,7 @@ def run(logger):
 
     errors = 0
     for folder in folders:
-        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger, chmod, chown):
+        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger, chmod, chown, ssh_args):
             errors += 1
 
     if errors:
