@@ -117,6 +117,28 @@ def _per_folder_counts(stdout):
     return counts
 
 
+# rsync exit codes meaning "some files failed, everything else transferred":
+# 23 = partial transfer due to error, 24 = source files vanished mid-transfer.
+_PARTIAL_EXIT_CODES = (23, 24)
+
+
+def _per_folder_errors(stderr, folder_names):
+    """Map each folder to the rsync stderr lines that mention a path inside it.
+
+    rsync error lines carry the offending path, e.g.
+    'rsync: send_files failed to open "/src/2026-03_Smith/x.raw": Permission denied',
+    so a batched run can still say which folder(s) had problems.
+    """
+    errors = {}
+    lines = [l.strip() for l in stderr.splitlines() if l.strip()]
+    for folder in folder_names:
+        pat = re.compile(r'(?:^|[/"\s])' + re.escape(folder) + r'(?:/|"|\s|$)')
+        hits = [l for l in lines if pat.search(l)]
+        if hits:
+            errors[folder] = hits
+    return errors
+
+
 def sync_folders(source_dir, dest_dir, folder_names, exclude_args, delete, dry_run,
                  logger, chmod="", chown="", ssh_args=None, timeout=900):
     """Rsync every experiment folder in ONE rsync invocation. True on success.
@@ -163,18 +185,33 @@ def sync_folders(source_dir, dest_dir, folder_names, exclude_args, delete, dry_r
                      timeout, len(folder_names))
         return False
 
-    if result.returncode != 0:
+    # Any other non-zero exit (connection lost, auth failure, ...) means the
+    # batch as a whole did not run, so there is nothing per-folder to report.
+    if result.returncode != 0 and result.returncode not in _PARTIAL_EXIT_CODES:
         logger.error("rsync failed (exit %d): %s",
                      result.returncode, result.stderr.strip())
         return False
 
+    # On a partial transfer rsync still moved everything it could, so log the
+    # successful folders as usual and name only the ones that had errors.
     prefix = "[DRY RUN] " if dry_run else ""
     counts = _per_folder_counts(result.stdout)
     for folder in folder_names:
         if folder in counts:
             logger.info("%sSynced %s (%d item(s) transferred)",
                         prefix, folder, counts[folder])
-    return True
+
+    if result.returncode == 0:
+        return True
+
+    errors = _per_folder_errors(result.stderr, folder_names)
+    for folder, lines in errors.items():
+        logger.error("rsync errors in %s (exit %d): %s",
+                     folder, result.returncode, " | ".join(lines))
+    if not errors:
+        logger.error("rsync partial transfer (exit %d): %s",
+                     result.returncode, result.stderr.strip())
+    return False
 
 
 def run(logger):
@@ -212,7 +249,7 @@ def run(logger):
                       logger, chmod, chown, ssh_args, config["rsync_timeout"])
 
     if not ok:
-        logger.warning("Data sync failed for the batch of %d folder(s)", len(folders))
+        logger.warning("Data sync completed with errors (%d folder(s))", len(folders))
         return False
 
     logger.info("Data sync completed successfully (%d folder(s))", len(folders))
