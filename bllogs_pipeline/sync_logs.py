@@ -15,6 +15,10 @@ from rsync_ssh import build_rsync_ssh
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.yaml")
 
+# rsync exit codes meaning "some files failed, everything else transferred":
+# 23 = partial transfer due to error, 24 = source files vanished mid-transfer.
+_PARTIAL_EXIT_CODES = (23, 24)
+
 
 def load_config():
     with open(CONFIG_PATH) as f:
@@ -105,7 +109,9 @@ def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, match
         logger.error("rsync timed out after %d seconds", timeout)
         return False
 
-    if result.returncode != 0:
+    # Any other non-zero exit (connection lost, auth failure, ...) means
+    # nothing was transferred, so there is no transfer count to report.
+    if result.returncode != 0 and result.returncode not in _PARTIAL_EXIT_CODES:
         logger.error("rsync failed (exit %d): %s", result.returncode, result.stderr.strip())
         return False
 
@@ -117,10 +123,18 @@ def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, match
     if transferred:
         prefix = "[DRY RUN] " if dry_run else ""
         logger.info("%sSynced %d log item(s)", prefix, len(transferred))
-    else:
+    elif result.returncode == 0:
         logger.info("No new log files to transfer")
 
-    return True
+    if result.returncode == 0:
+        return True
+
+    # On a partial transfer rsync still moved everything it could; its stderr
+    # lines already name each offending file, so log them one by one.
+    for line in result.stderr.splitlines():
+        if line.strip():
+            logger.error("rsync error (exit %d): %s", result.returncode, line.strip())
+    return False
 
 
 def run(logger):
