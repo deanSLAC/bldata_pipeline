@@ -82,6 +82,10 @@ halves having their own copy is how they drift apart.
   `keyboard-interactive`, and every method the client tries counts against the
   server's `MaxAuthTries`. That is the likely source of the
   `Too many authentication failures` disconnects that dominate `sync.log`.
+- `BatchMode=yes` + `ConnectTimeout=30` make a broken transport **fail instead of
+  hang**. Under cron nobody can answer a password or host-key prompt, so without
+  them a rejected key or unreachable DTN sits until the rsync timeout, holding the
+  lock the whole time.
 - `ControlMaster=auto` + `ControlPersist=180` put every rsync in a run — and, because
   the persist window is longer than the cron interval, consecutive runs too — on
   **one TCP connection with one authentication**. At 0.31 ms RTT to the DTN a single

@@ -20,11 +20,15 @@ CONTROL_PATH = os.path.join(SCRIPT_DIR, ".mux-%C")
 # authenticated connection instead of making a new one.
 CONTROL_PERSIST = "180"
 
+# Seconds to wait for the TCP connect + SSH handshake before giving up.
+# (rsync's --contimeout is daemon-only; over ssh this is the equivalent.)
+CONNECT_TIMEOUT = "30"
+
 
 def build_rsync_ssh(ssh_key):
     """Return rsync's -e argument for our SSH transport, or [] for the default.
 
-    Three things are going on here:
+    Four things are going on here:
 
     IdentitiesOnly=yes plus PreferredAuthentications=publickey and
     GSSAPIAuthentication=no reduce each connection to exactly ONE
@@ -40,6 +44,13 @@ def build_rsync_ssh(ssh_key):
     per master lifetime. At 0.31 ms RTT to the DTN a single TCP flow is not a
     throughput constraint (the bandwidth-delay product is ~35 KB).
 
+    BatchMode=yes plus ConnectTimeout=30 make a broken transport FAIL rather
+    than hang. Under cron there is nobody to answer a password or host-key
+    prompt, so without BatchMode a rejected key waits on the prompt until the
+    subprocess timeout kills it, holding the lock for the whole window. The
+    connect timeout does the same for an unreachable DTN. Both apply to the
+    master connection; clients riding an existing socket skip them.
+
     If the socket is ever left stale -- ssh logs "cannot bind to path ...:
     Address already in use" -- ssh falls back to an ordinary unmultiplexed
     connection, so syncs keep working. Delete .mux-* to restore multiplexing.
@@ -52,6 +63,8 @@ def build_rsync_ssh(ssh_key):
         "-o IdentitiesOnly=yes",
         "-o PreferredAuthentications=publickey",
         "-o GSSAPIAuthentication=no",
+        "-o BatchMode=yes",
+        f"-o ConnectTimeout={CONNECT_TIMEOUT}",
         "-o ControlMaster=auto",
         f"-o ControlPath={CONTROL_PATH}",
         f"-o ControlPersist={CONTROL_PERSIST}",
