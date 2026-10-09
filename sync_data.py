@@ -8,6 +8,8 @@ import subprocess
 
 import yaml
 
+from rsync_ssh import build_rsync_ssh
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.yaml")
 
@@ -32,6 +34,9 @@ def load_config():
     config.setdefault("chmod", "")
     config.setdefault("chown", "")
     config.setdefault("ssh_key", "")
+    # One rsync now carries every folder, so the timeout covers the whole batch
+    # rather than a single folder. The old per-folder value was 300.
+    config.setdefault("rsync_timeout", 900)
 
     return config
 
@@ -87,24 +92,55 @@ def build_rsync_excludes(exclude_patterns):
     return args
 
 
-def build_rsync_ssh(ssh_key):
-    """Return rsync args to use a specific SSH key, or [] for the default.
+_SUMMARY_PREFIXES = (
+    "sending", "sent ", "total size", "created directory", "receiving",
+    "building file list", "delta-transmission",
+)
 
-    IdentitiesOnly=yes forces ssh to use only this key, avoiding
-    "Too many authentication failures" when other keys/agent identities exist.
+
+def _per_folder_counts(stdout):
+    """Group rsync -av --relative output lines by their top-level folder.
+
+    --files-from implies --relative, so every line rsync prints is already
+    prefixed with the folder it belongs to (e.g. "2026-03_Smith/scan_01.raw").
+    That lets one batched rsync still produce the per-folder log lines this
+    pipeline has always written.
     """
-    if not ssh_key:
-        return []
-    key_path = os.path.expanduser(ssh_key)
-    return ["-e", f"ssh -i {key_path} -o IdentitiesOnly=yes"]
+    counts = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line or line == "./" or line.startswith(_SUMMARY_PREFIXES):
+            continue
+        folder = line.split("/", 1)[0]
+        if folder:
+            counts[folder] = counts.get(folder, 0) + 1
+    return counts
 
 
-def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run, logger, chmod="", chown="", ssh_args=None):
-    """Rsync a single experiment folder. Returns True on success."""
-    src = os.path.join(source_dir, folder_name) + "/"
-    dst = os.path.join(dest_dir, folder_name) + "/"
+def sync_folders(source_dir, dest_dir, folder_names, exclude_args, delete, dry_run,
+                 logger, chmod="", chown="", ssh_args=None, timeout=900):
+    """Rsync every experiment folder in ONE rsync invocation. True on success.
 
-    cmd = ["rsync", "-av"]
+    This used to be one rsync -- and therefore one SSH connection, one
+    authentication and one remote directory enumeration -- per folder. With 56
+    folders on a 60-second cron that was 80,640 connections a day, and measured
+    at ~780 ms per folder it was most of each tick's 43 seconds even when
+    nothing had changed.
+
+    The folder list goes to rsync over --files-from, which preserves the
+    selection logic in find_experiment_folders() and run() exactly: globs, the
+    YYYY-mm_ pattern and exclude_folders all still decide what is in the list.
+    --files-from implies --relative, so a folder named in the list lands at
+    <dest_dir>/<folder>/ just as it did before. The list is NUL-delimited
+    (--from0) so no folder name can be misread.
+    """
+    src = source_dir.rstrip("/") + "/"
+    dst = dest_dir.rstrip("/") + "/"
+
+    # -r must be explicit: --files-from implies --dirs, which overrides the -r
+    # that -a would otherwise supply. Without it rsync creates the folders at
+    # the destination, transfers nothing into them, and exits 0.
+    cmd = ["rsync", "-av", "-r", "--files-from=-", "--from0"]
     if ssh_args:
         cmd += ssh_args
     if delete:
@@ -117,25 +153,27 @@ def sync_folder(source_dir, dest_dir, folder_name, exclude_args, delete, dry_run
         cmd.append(f"--chown={chown}")
     cmd += exclude_args + [src, dst]
 
+    payload = "".join(name + "\0" for name in folder_names)
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, input=payload, capture_output=True,
+                                text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        logger.error("rsync timed out for %s after 5 minutes", folder_name)
+        logger.error("rsync timed out after %d seconds (%d folder(s))",
+                     timeout, len(folder_names))
         return False
 
     if result.returncode != 0:
-        logger.error("rsync failed for %s (exit %d): %s", folder_name, result.returncode, result.stderr.strip())
+        logger.error("rsync failed (exit %d): %s",
+                     result.returncode, result.stderr.strip())
         return False
 
-    # Only log transferred files (skip blank lines and summary)
-    transferred = [
-        line for line in result.stdout.strip().splitlines()
-        if line and not line.startswith("sending") and not line.startswith("sent ")
-        and not line.startswith("total size") and line != "./"
-    ]
-    if transferred:
-        prefix = "[DRY RUN] " if dry_run else ""
-        logger.info("%sSynced %s (%d item(s) transferred)", prefix, folder_name, len(transferred))
+    prefix = "[DRY RUN] " if dry_run else ""
+    counts = _per_folder_counts(result.stdout)
+    for folder in folder_names:
+        if folder in counts:
+            logger.info("%sSynced %s (%d item(s) transferred)",
+                        prefix, folder, counts[folder])
     return True
 
 
@@ -170,13 +208,11 @@ def run(logger):
 
     exclude_args = build_rsync_excludes(exclude_patterns)
 
-    errors = 0
-    for folder in folders:
-        if not sync_folder(source_dir, dest_dir, folder, exclude_args, delete, dry_run, logger, chmod, chown, ssh_args):
-            errors += 1
+    ok = sync_folders(source_dir, dest_dir, folders, exclude_args, delete, dry_run,
+                      logger, chmod, chown, ssh_args, config["rsync_timeout"])
 
-    if errors:
-        logger.warning("Data sync completed with %d error(s) out of %d folder(s)", errors, len(folders))
+    if not ok:
+        logger.warning("Data sync failed for the batch of %d folder(s)", len(folders))
         return False
 
     logger.info("Data sync completed successfully (%d folder(s))", len(folders))

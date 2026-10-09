@@ -6,3 +6,4 @@ sync_logs.log
 config.yaml
 .sync.lock
 .sync_logs.lock
+.mux-*

@@ -7,6 +7,11 @@ import subprocess
 
 import yaml
 
+# The log sync targets the same host with the same key as the data sync, so it
+# shares that run's multiplexed master connection and authenticates zero extra
+# times. Keeping the transport in one module is what guarantees they match.
+from rsync_ssh import build_rsync_ssh
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.yaml")
 
@@ -26,6 +31,7 @@ def load_config():
     config.setdefault("chmod", "")
     config.setdefault("chown", "")
     config.setdefault("ssh_key", "")
+    config.setdefault("rsync_timeout", 900)
 
     return config
 
@@ -67,19 +73,7 @@ def build_rsync_excludes(exclude_patterns):
     return args
 
 
-def build_rsync_ssh(ssh_key):
-    """Return rsync args to use a specific SSH key, or [] for the default.
-
-    IdentitiesOnly=yes forces ssh to use only this key, avoiding
-    "Too many authentication failures" when other keys/agent identities exist.
-    """
-    if not ssh_key:
-        return []
-    key_path = os.path.expanduser(ssh_key)
-    return ["-e", f"ssh -i {key_path} -o IdentitiesOnly=yes"]
-
-
-def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths=None, chmod="", chown="", ssh_args=None):
+def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths=None, chmod="", chown="", ssh_args=None, timeout=900):
     """Rsync log files to the destination. Returns True on success.
 
     If matched_paths is None, syncs the entire source_dir.
@@ -106,9 +100,9 @@ def sync_logs(source_dir, dest_dir, exclude_args, delete, dry_run, logger, match
         cmd += exclude_args + [src, dst]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
-        logger.error("rsync timed out after 5 minutes")
+        logger.error("rsync timed out after %d seconds", timeout)
         return False
 
     if result.returncode != 0:
@@ -157,4 +151,5 @@ def run(logger):
 
     exclude_args = build_rsync_excludes(exclude_patterns)
 
-    return sync_logs(base_dir, dest_dir, exclude_args, delete, dry_run, logger, matched_paths, chmod, chown, ssh_args)
+    return sync_logs(base_dir, dest_dir, exclude_args, delete, dry_run, logger,
+                     matched_paths, chmod, chown, ssh_args, config["rsync_timeout"])

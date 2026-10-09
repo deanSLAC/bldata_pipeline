@@ -14,9 +14,16 @@ delete: false
 dry_run: false
 
 # SSH private key for the rsync transport (optional). When set, rsync runs
-# `ssh -i <ssh_key> -o IdentitiesOnly=yes` instead of using the default key.
+# rsync_ssh.py's transport instead of ssh's default key resolution. That
+# transport pins publickey-only auth and multiplexes all rsyncs in a run onto
+# one connection -- see the SSH transport section of README.md.
 # Leave empty to use ssh's default key resolution / ~/.ssh/config.
 # ssh_key: "~/.ssh/s3df-key"
+
+# Seconds before a sync is abandoned. This covers the WHOLE batch -- every
+# folder moves in one rsync via --files-from -- not a single folder, which is
+# why it is larger than the old per-folder value of 300.
+rsync_timeout: 900
 
 # Set destination file permissions (optional, e.g. "770", "755")
 # chmod: "770"
