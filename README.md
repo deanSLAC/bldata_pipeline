@@ -1,5 +1,10 @@
 # BL Data Pipeline
 
+> **Inactive.** Replaced on 2026-10-10 by
+> [`beamline_syncer`](https://github.com/deanSLAC/beamline_syncer), which now
+> runs the BL15-2 (bl152lx1) and BL4-1 (bl41lx1) syncs. It does everything this
+> pipeline did, from the same kind of config. Kept for reference only.
+
 Automated data sync tool that rsyncs experiment folders from a source directory to a destination directory.
 
 ## Setup
